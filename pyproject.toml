@@ -1,0 +1,30 @@
+[project]
+name = "embedded-twin"
+version = "0.1.0"
+description = "Digital-twin simulation of embedded hardware systems: firmware execution, pin-level behavior, power, thermal, and environment (GNSS/cellular/BLE) on a PC."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Fiona Prendergast" }]
+dependencies = [
+    "unicorn>=2.0",
+    "sgp4>=2.20",
+    "pyelftools>=0.29",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+twin = "twin.cli:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["twin*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
