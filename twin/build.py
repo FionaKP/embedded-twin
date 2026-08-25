@@ -10,7 +10,7 @@ from .ir import BoardIR
 from .power import PowerEngine
 
 # importing the stdlib modules populates the registry
-from .components import passives, power_parts, inputs, sensors, mcu  # noqa: F401
+from .components import passives, power_parts, inputs, sensors, mcu, radio  # noqa: F401
 
 
 @dataclass
