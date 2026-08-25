@@ -1,0 +1,6 @@
+Reference,Value,PartNumber,Model,param:vout,param:i_limit_ma
+U1,STM32F405RGT6,STM32F405RGT6,,,
+U2,AP2112K-3.3,AP2112K-3.3TRG1,,3.3,600
+"R1, R2",,,,,
+LED1,LED_GREEN,,,,
+SW1,,,,,
