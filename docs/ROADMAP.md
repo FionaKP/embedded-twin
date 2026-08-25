@@ -1,17 +1,17 @@
 # Roadmap
 
-## v0.1 — the proving ground (this build)
+## v0.1 — the proving ground (complete)
 - [x] Architecture + ADRs
-- [ ] Core kernel: event scheduler, nets, signal resolution, trace recorder
-- [ ] Board IR + JSON serialization
-- [ ] Ingest: KiCad netlist (S-expr) + BOM CSV → IR
-- [ ] Component model SDK + standard library (regulator, battery, LED, button, sensor, GNSS, cell modem, BLE)
-- [ ] Power + thermal engine
-- [ ] CPU: Unicorn Cortex-M backend (GPIO, USART, SysTick) + behavioral firmware backend
-- [ ] Environment: GNSS (SGP4/TLE), cellular, BLE
-- [ ] Scenario engine + CLI + reports + lockfile
-- [ ] Example project: asset-tracker board with ringer scenarios
-- [ ] CI (GitHub Actions)
+- [x] Core kernel: event scheduler, nets, signal resolution, trace recorder
+- [x] Board IR + JSON serialization
+- [x] Ingest: KiCad netlist (S-expr) + BOM CSV → IR
+- [x] Component model SDK + standard library (regulator, battery, LED, button, sensor, GNSS, cell modem, BLE)
+- [x] Power + thermal engine
+- [x] CPU: Unicorn Cortex-M backend (GPIO, USART, SysTick) + behavioral firmware backend
+- [x] Environment: GNSS (SGP4/TLE), cellular, BLE
+- [x] Scenario engine + CLI + reports + lockfile
+- [x] Example project: asset-tracker board with ringer scenarios
+- [x] CI (GitHub Actions)
 
 ## v0.2 — fidelity
 - More MCU peripherals (SPI, I2C, ADC, DMA, RTC, low-power modes), NVIC interrupt fidelity

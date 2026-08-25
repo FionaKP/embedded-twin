@@ -1,0 +1,44 @@
+# Device drives into a downtown street canyon, loses GNSS, and must recover.
+name: urban_canyon_recovery
+description: GNSS degradation and recovery; reports skip cleanly, then resume.
+duration: 20m
+seed: 11
+
+board:
+  netlist: ../hardware/tracker.net
+  bom: ../hardware/tracker_bom.csv
+  components:
+    U1:
+      params:
+        pinmap: {PA0: 0, PA2: 2, PA3: 3, PA5: 5, PB0: 8, PA9: 9, PA10: 10, PB6: 6, PB7: 7}
+        uarts:
+          - {tx: PA2, rx: PA3, baud: 9600}
+          - {tx: PA9, rx: PA10, baud: 115200}
+        i2c:
+          - {scl: PB6, sda: PB7}
+
+firmware:
+  U1:
+    behavioral: firmware.tracker_fw:main
+
+environment:
+  start_utc: "2026-08-25T12:00:00"
+  position: {lat: 42.2626, lon: -71.8023}
+  gnss: {condition: open_sky}
+  cellular:
+    towers:
+      - {id: cell-A, lat: 42.27, lon: -71.81, load: 0.2}
+
+events:
+  - {at: 5m, do: set_gnss_condition, value: urban_canyon}
+  - {at: 15m, do: set_gnss_condition, value: open_sky}
+
+assertions:
+  # healthy before the canyon
+  - {type: uart_contains, net: /MCU_TX_MDM, pattern: "AT+CSOSEND", before: 5m}
+  # canyon: only 3 usable SVs here -> no fix -> cycles skip, firmware stays sane
+  - {type: log_contains, pattern: "report skipped"}
+  # recovery: hot-start fix and reports resume
+  - {type: uart_contains, net: /MCU_TX_MDM, pattern: "AT+CSOSEND", after: 15m}
+  - {type: state_at_end, ref: GPS1, state: tracking}
+  - {type: no_contention}

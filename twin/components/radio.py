@@ -48,6 +48,7 @@ class GnssReceiver(_PoweredRadio):
 
     def start(self) -> None:
         self._setup_supply()
+        self.en = self.net("EN", "ON_OFF", "WAKEUP")
         self.uart = Uart(self.kernel, self.ref,
                          tx_net=self.net("TX", "TXD"), rx_net=self.net("RX", "RXD"),
                          baud=int(self.params.get("baud", 9600)))
@@ -59,14 +60,20 @@ class GnssReceiver(_PoweredRadio):
         self.set_state("off")
         self.kernel.schedule(0, self._tick)
 
+    def _enabled(self) -> bool:
+        """VCC present and, when an EN/ON_OFF pin is wired, EN held high."""
+        return self.powered() and (self.en is None or self.en.is_high)
+
     def _tick(self) -> None:
         self.kernel.schedule(1 * SEC, self._tick)
         env = _env(self.kernel)
-        if not self.powered() or env is None or env.gnss is None:
+        if not self._enabled() or env is None or env.gnss is None:
             if self.state != "off":
                 self.set_state("off")
                 self.set_load(self.rail, 0.0)
                 self.has_fix, self.lock_s = False, 0.0
+                # start_mode stays as-is: once a fix was had it is "hot"
+                # (battery-backed ephemeris), else still "cold"
             return
 
         when, pos = env.utc_now(), env.position_now()
@@ -160,10 +167,10 @@ class CellModem(_PoweredRadio):
         env = _env(self.kernel)
         if env is not None and env.cellular is not None:
             env.cellular.on_load_change(self._load_changed)
-        self.kernel.schedule(0, self._boot_check)
+        self.kernel.schedule(0, self._supply_changed)
 
-    # -- lifecycle --------------------------------------------------------
-    def _boot_check(self) -> None:
+    # -- lifecycle (supply-event-driven, no polling) ----------------------
+    def _supply_changed(self) -> None:
         if self.powered() and self.state == "off":
             self.set_state("booting")
             self.kernel.schedule(int(self.params.get("boot_s", 2.0) * SEC),
@@ -172,7 +179,6 @@ class CellModem(_PoweredRadio):
             self.set_state("off")
             self.registered = False
             self.set_load(self.rail, 0.0)
-        self.kernel.schedule(100 * MS, self._boot_check)
 
     def _start_search(self) -> None:
         if not self.powered():

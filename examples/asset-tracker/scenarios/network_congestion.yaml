@@ -1,0 +1,43 @@
+# The tower overloads (stadium event); the network kicks us off mid-session.
+name: network_congestion
+description: Attach, get kicked by a loaded tower, re-register, resume reporting.
+duration: 10m
+seed: 23
+
+board:
+  netlist: ../hardware/tracker.net
+  bom: ../hardware/tracker_bom.csv
+  components:
+    U1:
+      params:
+        pinmap: {PA0: 0, PA2: 2, PA3: 3, PA5: 5, PB0: 8, PA9: 9, PA10: 10, PB6: 6, PB7: 7}
+        uarts:
+          - {tx: PA2, rx: PA3, baud: 9600}
+          - {tx: PA9, rx: PA10, baud: 115200}
+        i2c:
+          - {scl: PB6, sda: PB7}
+
+firmware:
+  U1:
+    behavioral: firmware.tracker_fw:main
+
+environment:
+  start_utc: "2026-08-25T12:00:00"
+  position: {lat: 42.2626, lon: -71.8023}
+  gnss: {condition: open_sky}
+  cellular:
+    towers:
+      - {id: cell-A, lat: 42.27, lon: -71.81, load: 0.2, kick_threshold: 0.9}
+
+events:
+  - {at: 150s, do: set_cell_load, tower: cell-A, value: 0.97}
+  - {at: 300s, do: set_cell_load, tower: cell-A, value: 0.30}
+
+assertions:
+  - {type: uart_contains, net: /MCU_TX_MDM, pattern: "AT+CSOSEND", before: 150s}
+  - {type: log_contains, pattern: "kicked off"}
+  - {type: uart_contains, net: /MDM_TX, pattern: "+CREG: 0", after: 149s}
+  - {type: log_contains, pattern: "report skipped"}
+  - {type: uart_contains, net: /MCU_TX_MDM, pattern: "AT+CSOSEND", after: 330s}
+  - {type: state_at_end, ref: MDM1, state: registered}
+  - {type: no_contention}

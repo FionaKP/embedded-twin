@@ -1,0 +1,12 @@
+Reference,Value,PartNumber,Model,param:capacity_mah,param:vout,param:boot_s
+BT1,18650,,,2000,,
+U1,STM32F405RGT6,STM32F405RGT6,,,,
+U2,AP2112K-3.3,AP2112K-3.3TRG1,,,3.3,
+U3,TMP102,TMP102AIDRLR,,,,
+GPS1,NEO-M8N,NEO-M8N-0-10,,,,
+MDM1,SARA-R510M8S,SARA-R510M8S-00B,,,,2
+BLE1,RN4870,RN4870-I/RM118,,,,
+"R1, R2, R3, R4",,,,,,
+LED1,LED_GREEN,,,,,
+SW1,,,,,,
+C1,10uF,,,,,

@@ -1,0 +1,38 @@
+# The question every hardware review asks: does it survive a day?
+name: battery_life_24h
+description: 24 hours of duty-cycled operation on a 2000 mAh cell.
+duration: 24h
+seed: 42
+
+board:
+  netlist: ../hardware/tracker.net
+  bom: ../hardware/tracker_bom.csv
+  components:
+    U1:
+      params:
+        pinmap: {PA0: 0, PA2: 2, PA3: 3, PA5: 5, PB0: 8, PA9: 9, PA10: 10, PB6: 6, PB7: 7}
+        uarts:
+          - {tx: PA2, rx: PA3, baud: 9600}
+          - {tx: PA9, rx: PA10, baud: 115200}
+        i2c:
+          - {scl: PB6, sda: PB7}
+
+firmware:
+  U1:
+    behavioral: firmware.tracker_fw:main
+
+environment:
+  start_utc: "2026-08-25T12:00:00"
+  position: {lat: 42.2626, lon: -71.8023}
+  gnss: {condition: open_sky}
+  cellular:
+    towers:
+      - {id: cell-A, lat: 42.27, lon: -71.81, load: 0.2}
+
+assertions:
+  - {type: battery_soc_min, ref: BT1, min: 0.80}
+  - {type: power_budget, rail: VBAT, max_avg_ma: 15}
+  - {type: power_budget, rail: "+3V3", max_avg_ma: 6}
+  - {type: log_contains, pattern: "report sent"}
+  - {type: temp_max, ref: U2, max_c: 60}
+  - {type: no_contention}

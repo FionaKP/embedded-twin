@@ -1,0 +1,40 @@
+# First light: does the whole system come up and do its job once?
+name: smoke_test
+description: Boot, acquire GNSS fix, register on the network, send one report.
+duration: 120s
+seed: 7
+
+board:
+  netlist: ../hardware/tracker.net
+  bom: ../hardware/tracker_bom.csv
+  components:
+    U1:
+      params:
+        pinmap: {PA0: 0, PA2: 2, PA3: 3, PA5: 5, PB0: 8, PA9: 9, PA10: 10, PB6: 6, PB7: 7}
+        uarts:
+          - {tx: PA2, rx: PA3, baud: 9600}     # GNSS
+          - {tx: PA9, rx: PA10, baud: 115200}  # modem
+        i2c:
+          - {scl: PB6, sda: PB7}
+
+firmware:
+  U1:
+    behavioral: firmware.tracker_fw:main
+
+environment:
+  start_utc: "2026-08-25T12:00:00"
+  position: {lat: 42.2626, lon: -71.8023}
+  gnss: {condition: open_sky}
+  cellular:
+    towers:
+      - {id: cell-A, lat: 42.27, lon: -71.81, load: 0.2}
+
+assertions:
+  - {type: state_reached, ref: GPS1, state: tracking, by: 45s}
+  - {type: state_reached, ref: MDM1, state: registered, by: 15s}
+  - {type: uart_contains, net: /MDM_TX, pattern: "+CREG: 1"}
+  - {type: uart_contains, net: /MCU_TX_MDM, pattern: "AT+CSOSEND"}
+  - {type: log_contains, pattern: "report sent"}
+  - {type: log_contains, pattern: "T=25.0"}
+  - {type: transition_count, net: /LED_CTRL, level: "1", min: 1}
+  - {type: no_contention}
