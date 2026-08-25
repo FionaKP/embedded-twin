@@ -28,7 +28,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/twin run examples/asset-tracker/scenarios/battery_life_24h.yaml
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system design, [docs/ROADMAP.md](docs/ROADMAP.md) for the build phases, and [docs/FUTURE.md](docs/FUTURE.md) for capabilities deliberately deferred.
+Docs: [USAGE.md](docs/USAGE.md) (bring your own board) · [ARCHITECTURE.md](docs/ARCHITECTURE.md) (system design) · [MODEL_SDK.md](docs/MODEL_SDK.md) (write/generate component models) · [ROADMAP.md](docs/ROADMAP.md) · [FUTURE.md](docs/FUTURE.md) (deliberately deferred capabilities) · [docs/adr/](docs/adr/) (decisions)
 
 ## Repository layout
 
