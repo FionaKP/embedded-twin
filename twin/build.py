@@ -10,7 +10,7 @@ from .ir import BoardIR
 from .power import PowerEngine
 
 # importing the stdlib modules populates the registry
-from .components import passives, power_parts, inputs, sensors  # noqa: F401
+from .components import passives, power_parts, inputs, sensors, mcu  # noqa: F401
 
 
 @dataclass
@@ -30,8 +30,9 @@ class BoardTwin:
 
     def start(self) -> None:
         self.kernel.start()
-        self.kernel.run_until(self.kernel.now)  # settle power-on cascade
-        self.kernel.run(max_events=100_000)
+        # settle the power-on cascade (zero-delay events only); periodic
+        # activity stays queued for the caller's run_until()
+        self.kernel.run_until(self.kernel.now)
 
 
 def build_twin(ir: BoardIR, seed: int = 0, ambient_c: float = 25.0,
