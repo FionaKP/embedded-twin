@@ -31,6 +31,9 @@ class ScenarioRun:
     # -- setup ------------------------------------------------------------
     def _load_board(self) -> BoardIR:
         cfg = self.scenario.raw.get("board", {})
+        for d in cfg.get("model_dirs", []) or []:
+            from ..factory.loader import load_model_dir
+            load_model_dir(self.scenario.resolve(d))
         if "ir" in cfg:
             board = BoardIR.from_json(self.scenario.resolve(cfg["ir"]).read_text())
         else:

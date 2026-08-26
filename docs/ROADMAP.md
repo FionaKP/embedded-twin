@@ -28,7 +28,10 @@
 - [ ] ngspice co-simulation engine for analog subcircuits
 
 ## v0.3 — the agentic model factory
-- Datasheet → component model pipeline: an agent reads a part's datasheet, drafts a model against the SDK, generates conformance tests from datasheet tables, and iterates until they pass
+- [x] Groundwork shipped: `twin factory` pipeline (datasheet → BehaviorSpec →
+  model + conformance tests → revise loop → reviewed install), offline-tested
+  with an injected fake LLM; see docs/FACTORY.md
+- [ ] Eval suite: graded datasheet→model tasks measuring fidelity per family
 - Model provenance + confidence grading (datasheet-verified vs. heuristic)
 - Community model library with versioned releases
 

@@ -32,9 +32,18 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("models", help="list the component model registry")
 
+    p_fac = sub.add_parser("factory",
+                           help="generate a component model from a datasheet (agentic)")
+    p_fac.add_argument("datasheet", help="datasheet file (.pdf or text)")
+    p_fac.add_argument("--mpn", default="", help="part number hint")
+    p_fac.add_argument("-o", "--outdir", default="twin_models")
+    p_fac.add_argument("--max-iters", type=int, default=3)
+    p_fac.add_argument("--llm-model", default=None,
+                       help="override the Claude model id")
+
     args = p.parse_args(argv)
     return {"ingest": _ingest, "run": _run, "models": _models,
-            "view": _view}[args.cmd](args)
+            "view": _view, "factory": _factory}[args.cmd](args)
 
 
 def _ingest(args) -> int:
@@ -120,6 +129,27 @@ def _view(args) -> int:
     except KeyboardInterrupt:
         pass
     return 0
+
+
+def _factory(args) -> int:
+    try:
+        from .factory.llm import ClaudeLLM
+    except ImportError:
+        print("the factory needs the Anthropic SDK: pip install anthropic",
+              file=sys.stderr)
+        return 1
+    from .factory import ModelFactory
+    llm = ClaudeLLM(model=args.llm_model) if args.llm_model else ClaudeLLM()
+    result = ModelFactory(llm).run(args.datasheet, mpn_hint=args.mpn,
+                                   max_iters=args.max_iters, out_dir=args.outdir)
+    if result.passed:
+        print(f"PASS after {result.iterations} iteration(s): {result.installed}")
+        print("Review the generated model and its conformance tests before use;")
+        print(f"load it in scenarios via  board.model_dirs: [{args.outdir}]")
+        return 0
+    print(f"FAILED conformance after {result.iterations} iteration(s)")
+    print(result.test_output[-2000:])
+    return 1
 
 
 def _models(args) -> int:
