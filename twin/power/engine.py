@@ -85,6 +85,7 @@ class PowerEngine:
         self.rails: dict[str, RailStats] = {}
         self._last_t = 0
         self.total_time = 0
+        self._last_sample: dict = {}
 
     # -- registration -----------------------------------------------------
     def set_rail_voltage(self, rail: str, volts: float) -> None:
@@ -166,11 +167,21 @@ class PowerEngine:
             stats.charge_c += amps * dt
             stats.time_weighted_a += amps * dt
             stats.peak_a = max(stats.peak_a, amps)
+            # time-series sample for the trace/UI (only on change)
+            ma = round(amps * 1000, 4)
+            if self._last_sample.get(rail) != ma:
+                self._last_sample[rail] = ma
+                self.kernel.trace.record(now, "rail", rail, ma)
 
         for bat in self.batteries:
             amps = currents.get(bat.rail, 0.0)
             bat.drain(amps * dt)
             self._voltages[bat.rail] = bat.voltage(amps)
+            soc = round(bat.soc, 5)
+            if self._last_sample.get(("bat", bat.ref)) != soc:
+                self._last_sample[("bat", bat.ref)] = soc
+                self.kernel.trace.record(now, "battery", bat.ref,
+                                         {"soc": soc, "v": round(bat.voltage(amps), 3)})
 
         # regulator dissipation feeds thermal
         dissipation = dict(self._dissipation)
@@ -186,6 +197,10 @@ class PowerEngine:
                 node.temp_c = target + (node.temp_c - target) * math.exp(-dt / tau)
             else:
                 node.temp_c = target
+            t_c = round(node.temp_c, 2)
+            if self._last_sample.get(("th", ref)) != t_c:
+                self._last_sample[("th", ref)] = t_c
+                self.kernel.trace.record(now, "thermal", ref, t_c)
 
     # -- reporting --------------------------------------------------------
     def report(self) -> dict:

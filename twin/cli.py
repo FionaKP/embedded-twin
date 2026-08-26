@@ -21,11 +21,20 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("scenario", nargs="+", help="scenario YAML file(s)")
     p_run.add_argument("-o", "--outdir", default="out", help="report directory")
     p_run.add_argument("--json", action="store_true", help="print JSON result")
+    p_run.add_argument("--trace", action="store_true",
+                       help="also write <name>.trace.json for the UI")
+
+    p_view = sub.add_parser("view", help="open a run trace in the browser UI")
+    p_view.add_argument("trace", help="a .trace.json produced by `twin run --trace`")
+    p_view.add_argument("--port", type=int, default=8321)
+    p_view.add_argument("--no-open", action="store_true",
+                        help="don't launch a browser")
 
     sub.add_parser("models", help="list the component model registry")
 
     args = p.parse_args(argv)
-    return {"ingest": _ingest, "run": _run, "models": _models}[args.cmd](args)
+    return {"ingest": _ingest, "run": _run, "models": _models,
+            "view": _view}[args.cmd](args)
 
 
 def _ingest(args) -> int:
@@ -49,14 +58,21 @@ def _ingest(args) -> int:
 
 
 def _run(args) -> int:
-    from .scenario import run_scenario, to_markdown
+    from .scenario import to_markdown
+    from .scenario.runner import ScenarioRun
+    from .scenario.spec import load_scenario
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     all_passed = True
     for sc_path in args.scenario:
-        result = run_scenario(sc_path)
+        run = ScenarioRun(load_scenario(sc_path))
+        result = run.run()
         all_passed &= result["passed"]
         stem = Path(sc_path).stem
+        if args.trace:
+            from .scenario.traceexport import export_trace
+            (outdir / f"{stem}.trace.json").write_text(
+                json.dumps(export_trace(run.twin, result)))
         (outdir / f"{stem}.report.md").write_text(to_markdown(result))
         (outdir / f"{stem}.result.json").write_text(json.dumps(result, indent=2, default=str))
         (outdir / f"{stem}.lock.json").write_text(json.dumps(result["lock"], indent=2))
@@ -71,6 +87,39 @@ def _run(args) -> int:
                 if not r["passed"]:
                     print(f"    ❌ {r['spec']['type']}: {r['evidence']}")
     return 0 if all_passed else 1
+
+
+def _view(args) -> int:
+    import http.server
+    import functools
+    import shutil
+    import threading
+    import webbrowser
+
+    ui_dir = Path(__file__).parent.parent / "ui"
+    trace = Path(args.trace).resolve()
+    if not trace.exists():
+        print(f"no such trace: {trace}", file=sys.stderr)
+        return 1
+    serve_dir = trace.parent / ".twin-view"
+    serve_dir.mkdir(exist_ok=True)
+    for f in ui_dir.glob("*"):
+        if f.is_file():
+            shutil.copy(f, serve_dir / f.name)
+    shutil.copy(trace, serve_dir / "trace.json")
+
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=str(serve_dir))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
+    url = f"http://127.0.0.1:{args.port}/index.html"
+    print(f"twin view: serving {trace.name} at {url}  (ctrl-c to stop)")
+    if not args.no_open:
+        threading.Timer(0.3, webbrowser.open, args=(url,)).start()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
 
 
 def _models(args) -> int:
