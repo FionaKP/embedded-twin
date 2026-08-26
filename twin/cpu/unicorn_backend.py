@@ -69,7 +69,8 @@ class UnicornMCU:
 
         uc = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
         uc.mem_map(flash[0], flash[1])
-        uc.mem_map(0x0000_0000, flash[1])   # boot alias of flash
+        if flash[0] != 0:
+            uc.mem_map(0x0000_0000, flash[1])   # boot alias of flash
         for base, size in (ram_regions or [(mm.RAM_BASE, mm.RAM_SIZE)]):
             uc.mem_map(base, size)
         pw_base, pw_size = periph_window
@@ -84,7 +85,8 @@ class UnicornMCU:
     def load_bin(self, image: bytes, base: Optional[int] = None) -> None:
         base = self.flash[0] if base is None else base
         self.uc.mem_write(base, image)
-        self.uc.mem_write(0x0, image[:min(len(image), self.flash[1])])
+        if base != 0:
+            self.uc.mem_write(0x0, image[:min(len(image), self.flash[1])])
         self._reset_from_vector(bytes(image[:8]))
 
     def load_elf(self, path: str) -> None:

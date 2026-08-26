@@ -15,6 +15,7 @@ from pathlib import Path
 _LINKER_SCRIPTS = {
     # profile -> (flash_origin, flash_len, ram_origin, ram_len)
     "stm32f4": (0x0800_0000, "1024K", 0x2000_0000, "128K"),
+    "nrf52": (0x0000_0000, "512K", 0x2000_0000, "64K"),
     "twin": (0x0800_0000, "256K", 0x2000_0000, "64K"),
 }
 

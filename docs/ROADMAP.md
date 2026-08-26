@@ -20,7 +20,7 @@
   register-level C firmware runs unmodified (zig-compiled, pip-installable
   toolchain)
 - [x] Run viewer UI: waveforms, power dashboards, serial consoles (twin view)
-- [ ] nRF52 profile (same framework, different register style)
+- [x] nRF52 profile: CLOCK, GPIO P0, UARTE0 with EasyDMA against emulated RAM
 - [ ] More STM32 peripherals: SPI, I2C, ADC, DMA, RTC, EXTI, TIM
 - [ ] Exception preemption/nesting + SVC/PendSV (unlocks FreeRTOS)
 - [ ] Altium/Eagle netlist ingest; KiCad PCB (.kicad_pcb) for copper-aware

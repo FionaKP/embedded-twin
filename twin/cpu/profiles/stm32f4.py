@@ -7,11 +7,11 @@ peripheral window reads 0 / swallows writes — extend by adding blocks here.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..periph import (GpioPortStm32, Peripheral, PeripheralBus, PwrStm32,
                       RccStm32, UsartStm32)
+from .base import Profile
 
 if TYPE_CHECKING:
     from ...components.mcu import CortexM
@@ -27,19 +27,6 @@ PERIPH_SIZE = 0x1000_0000
 
 USART_IRQS = {"USART1": 37, "USART2": 38, "USART6": 71}
 USART_BASES = {"USART1": 0x4001_1000, "USART2": 0x4000_4400, "USART6": 0x4001_1400}
-
-
-@dataclass
-class Profile:
-    name: str
-    flash_base: int
-    flash_size: int
-    ram_regions: list[tuple[int, int]]
-    periph_base: int
-    periph_size: int
-    bus: PeripheralBus
-    usarts: dict[str, UsartStm32] = field(default_factory=dict)
-    gpio_ports: dict[str, GpioPortStm32] = field(default_factory=dict)
 
 
 def build_stm32f4(mcu: "CortexM") -> Profile:

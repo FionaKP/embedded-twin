@@ -421,46 +421,52 @@ export class WaveformView {
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
 
-    // Build runs: consecutive events whose boxes would overlap are merged.
-    let run = null;  // {x1, x2, count, firstIdx}
-    const flush = () => {
+    // Each event gets a box sized to its label but never overlapping the next
+    // event. When events are packed tighter than ~5px they merge into a
+    // single "N ev" density block instead.
+    ctx.lineWidth = 1;
+    let run = null;  // pending density block {x1, x2, count}
+    const flushRun = () => {
       if (!run) return;
       const w = Math.max(run.x2 - run.x1, 2);
       ctx.fillStyle = boxCol;
       ctx.fillRect(run.x1, y1, w, y2 - y1);
       ctx.strokeStyle = edgeCol;
-      ctx.lineWidth = 1;
       ctx.strokeRect(run.x1 + 0.5, y1 + 0.5, Math.max(w - 1, 1), y2 - y1 - 1);
-      ctx.fillStyle = textCol;
-      if (run.count === 1) {
-        const label = labelOf(data[run.firstIdx][1]);
-        if (ctx.measureText(label).width <= w - 4) {
-          ctx.fillText(label, run.x1 + 3, (y1 + y2) / 2 + 0.5);
-        }
-      } else if (w > 34) {
-        const label = `${run.count} ev`;
-        if (ctx.measureText(label).width <= w - 4) {
-          ctx.fillText(label, run.x1 + 3, (y1 + y2) / 2 + 0.5);
-        }
+      const label = `${run.count} ev`;
+      if (ctx.measureText(label).width <= w - 6) {
+        ctx.fillStyle = textCol;
+        ctx.fillText(label, run.x1 + 3, (y1 + y2) / 2 + 0.5);
       }
       run = null;
     };
 
     for (let i = i0; i <= i1; i++) {
       const x = this.xOf(data[i][0]);
+      const nextX = i + 1 < data.length ? this.xOf(data[i + 1][0]) : Infinity;
+      const avail = nextX - x - 1;
+      if (avail < 5) {
+        if (run && x <= run.x2 + 5) { run.x2 = Math.max(x + 2, run.x2); run.count++; }
+        else { flushRun(); run = { x1: x, x2: x + 2, count: 1 }; }
+        continue;
+      }
+      // this event fits on its own; a preceding dense run absorbs it if open
+      if (run) { run.x2 = Math.max(x + 2, run.x2); run.count++; flushRun(); continue; }
       const label = labelOf(data[i][1]);
-      const bw = wide
-        ? Math.min(Math.max(ctx.measureText(label).width + 8, 20), 260)
-        : Math.max(ctx.measureText(label).width + 7, 14);
-      if (run && x < run.x2 + 2) {
-        run.x2 = Math.max(run.x2, x + bw);
-        run.count++;
-      } else {
-        flush();
-        run = { x1: x, x2: x + bw, count: 1, firstIdx: i };
+      const desired = wide
+        ? Math.min(Math.max(ctx.measureText(label).width + 8, 20), 280)
+        : Math.max(ctx.measureText(label).width + 7, 12);
+      const w = Math.min(desired, avail);
+      ctx.fillStyle = boxCol;
+      ctx.fillRect(x, y1, w, y2 - y1);
+      ctx.strokeStyle = edgeCol;
+      ctx.strokeRect(x + 0.5, y1 + 0.5, Math.max(w - 1, 1), y2 - y1 - 1);
+      if (ctx.measureText(label).width <= w - 4) {
+        ctx.fillStyle = textCol;
+        ctx.fillText(label, x + 3, (y1 + y2) / 2 + 0.5);
       }
     }
-    flush();
+    flushRun();
   }
 
   _drawUart(ctx, lane, top) {
