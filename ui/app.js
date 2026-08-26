@@ -35,6 +35,8 @@ async function main() {
   document.getElementById('tabs').addEventListener('click', () => {
     requestAnimationFrame(() => waves.resize());
   });
+  // debug handle (e.g. twin.waves.setView(27e9, 27.2e9) from the console)
+  window.twin = { trace, waves };
 }
 
 /** Defensive cleanup: sort by time, drop same-timestamp duplicates (keep last). */

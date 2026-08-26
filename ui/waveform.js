@@ -12,7 +12,7 @@ import {
 
 const AXIS_H = 30;      // time axis strip at the top
 const LANE_H = 34;      // per-lane height
-const GUTTER = 178;     // label column width
+const GUTTER = 192;     // label column width
 const PAD_R = 10;
 
 const COL = {
@@ -205,10 +205,16 @@ export class WaveformView {
 
   _drawAxis(ctx, W, H) {
     const span = this.t1 - this.t0;
-    const step = pickStep(span / Math.max(1, (W - GUTTER) / 90));
+    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    // Adapt tick density to label width (deep-zoom labels get long).
+    let step = pickStep(span / Math.max(1, (W - GUTTER) / 90));
+    for (let pass = 0; pass < 3; pass++) {
+      const lw = ctx.measureText(fmtTick(this.t1, step)).width + 28;
+      if (lw <= step * this._pxPerNs) break;
+      step = pickStep(lw / this._pxPerNs);
+    }
     const first = Math.ceil(this.t0 / step) * step;
 
-    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
 
@@ -260,8 +266,8 @@ export class WaveformView {
         ctx.textAlign = 'right';
         ctx.fillStyle = COL.value;
         let s = v;
-        if (ctx.measureText(s).width > 56) {
-          while (s.length > 2 && ctx.measureText(s + '…').width > 56) s = s.slice(0, -1);
+        if (ctx.measureText(s).width > 72) {
+          while (s.length > 2 && ctx.measureText(s + '…').width > 72) s = s.slice(0, -1);
           s += '…';
         }
         ctx.fillText(s, GUTTER - 8, cy);

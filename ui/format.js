@@ -54,9 +54,9 @@ export function pickStep(targetNs) {
   return pow * 10;
 }
 
-/** Label a tick value given the step it was generated from (unit from step). */
+/** Label a tick value: unit from the tick magnitude, precision from the step. */
 export function fmtTick(ns, stepNs) {
-  const u = unitFor(stepNs);
+  const u = unitFor(Math.max(Math.abs(ns), stepNs));
   const decimals = Math.max(0, -Math.floor(Math.log10(stepNs / u.div) + 1e-9));
   return `${(ns / u.div).toFixed(decimals)} ${u.suffix}`;
 }

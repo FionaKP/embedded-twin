@@ -87,8 +87,15 @@ class ScenarioRun:
                     del sys.path[:len(roots)]
                 mcu.load_behavioral(fn)
             elif "file" in spec:
+                # stashed in params: the MCU loads it during start()
                 mcu.params["slice_us"] = spec.get("slice_us", mcu.params.get("slice_us", 1000))
-                mcu.load_firmware(str(self.scenario.resolve(spec["file"])))
+                mcu.params["firmware"] = str(self.scenario.resolve(spec["file"]))
+            elif "c" in spec:
+                # compile C source on the fly (zig toolchain, pip-installable)
+                from ..cpu import cbuild
+                profile = mcu.params.get("profile", "twin")
+                code = self.scenario.resolve(spec["c"]).read_text()
+                mcu.params["firmware"] = cbuild.compile_c(code, profile=profile)
 
     # -- stimuli ----------------------------------------------------------
     def _schedule_events(self) -> None:

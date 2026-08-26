@@ -128,13 +128,17 @@ def _log_contains(spec, twin, power):
 
 
 def _transition_count(spec, twin, power):
-    edges = twin.kernel.trace.transitions(spec["net"])
+    start = parse_time(spec.get("after", 0))
+    end = parse_time(spec["before"]) if "before" in spec else None
+    edges = [(t, lvl) for t, lvl in twin.kernel.trace.transitions(spec["net"])
+             if t >= start and (end is None or t <= end)]
     if "level" in spec:
         edges = [e for e in edges if e[1] == str(spec["level"])]
     n = len(edges)
     lo, hi = spec.get("min", 0), spec.get("max", 10 ** 9)
+    window = f" in [{spec.get('after', '0s')}..{spec.get('before', 'end')}]"
     return _verdict(spec, lo <= n <= hi,
-                    f"{spec['net']}: {n} transitions (want {lo}..{hi})")
+                    f"{spec['net']}: {n} transitions{window} (want {lo}..{hi})")
 
 
 _HANDLERS = {

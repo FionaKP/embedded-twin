@@ -1,0 +1,30 @@
+# Real C firmware (compiled on the fly), real STM32F4 register addresses.
+name: button_blink
+description: PA5 blinks at 250 ms; holding the button (PA0) switches to 50 ms.
+duration: 4s
+seed: 3
+
+board:
+  netlist: ../hardware/board.net
+  bom: null
+  external_supplies: {VUSB: 5.0}
+  components:
+    U1:
+      model: mcu.cortex_m
+      params: {profile: stm32f4, clock_hz: 16000000, slice_us: 1000}
+    U2: {model: regulator.ldo, params: {vout: 3.3}}
+
+firmware:
+  U1:
+    c: ../firmware/main.c
+
+events:
+  - {at: 2s, do: press, target: SW1}
+
+assertions:
+  # slow phase: 250 ms toggles -> ~8 edges in the first 2 s
+  - {type: transition_count, net: /LED_CTRL, before: 2s, min: 6, max: 10}
+  # button held: 50 ms toggles -> ~40 edges in the last 2 s
+  - {type: transition_count, net: /LED_CTRL, after: 2s, min: 34, max: 44}
+  - {type: state_at_end, ref: U1, state: running}
+  - {type: no_contention}

@@ -5,7 +5,8 @@ import pytest
 
 from twin.scenario import run_scenario, to_markdown
 
-SCEN = Path(__file__).parent.parent / "examples" / "asset-tracker" / "scenarios"
+EXAMPLES = Path(__file__).parent.parent / "examples"
+SCEN = EXAMPLES / "asset-tracker" / "scenarios"
 
 
 @pytest.mark.parametrize("name", ["smoke_test", "urban_canyon_recovery",
@@ -24,6 +25,16 @@ def test_battery_scenario_and_report_render():
     assert 0.8 < soc < 0.95
     md = to_markdown(result)
     assert "Verdict: PASS" in md and "lock" in md
+
+
+def test_stm32_c_firmware_scenario():
+    from twin.cpu import cbuild
+    if not cbuild.zig_available():
+        pytest.skip("ziglang not installed")
+    result = run_scenario(str(EXAMPLES / "stm32-button-led" / "scenarios"
+                              / "button_blink.yaml"))
+    failed = [r["evidence"] for r in result["assertions"] if not r["passed"]]
+    assert result["passed"], failed
 
 
 def test_determinism_across_runs():

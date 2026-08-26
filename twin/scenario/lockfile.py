@@ -26,6 +26,8 @@ def make_lock(scenario: Scenario, board: BoardIR) -> dict:
     for ref, spec in (scenario.raw.get("firmware", {}) or {}).items():
         if "file" in spec:
             inputs[f"firmware:{ref}"] = _file_hash(scenario.resolve(spec["file"]))
+        elif "c" in spec:
+            inputs[f"firmware:{ref}"] = _file_hash(scenario.resolve(spec["c"]))
         elif "behavioral" in spec:
             inputs[f"firmware:{ref}"] = f"behavioral:{spec['behavioral']}"
     lock = {
