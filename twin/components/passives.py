@@ -67,7 +67,37 @@ class Inductor(Component):
 
 @register("passive.diode")
 class Diode(Component):
-    """Structural in v0.1 (reverse-protection assumed correct)."""
+    """Forward conduction: anode high -> cathode pulled to Va - Vf.
+
+    params: vf (default 0.3, Schottky). Reverse never conducts. Registers a
+    power-tree edge (anode rail -> cathode rail) that reflects load only
+    while conducting — so a USB ORing diode routes current correctly.
+    """
+
+    def start(self) -> None:
+        self.a = self.require_net("A", "1")
+        self.k = self.require_net("K", "C", "2")
+        self.vf = self.params.get("vf", 0.3)
+        self.conducting = False
+        self.a.listen(lambda _n: self._update())
+        if self.power and self.a.net_class == "power" and self.k.net_class == "power":
+            from ..power.engine import Regulator
+            self.power.add_regulator(Regulator(
+                self.ref, self.a.name, self.k.name,
+                reflect=lambda out_a: out_a if self.conducting else 0.0,
+                dissipate=lambda out_a: self.vf * out_a if self.conducting else 0.0))
+        self._update()
+
+    def _update(self) -> None:
+        if self.a.is_high:
+            v = (self.a.voltage - self.vf) if self.a.voltage else None
+            self.k.drive(f"{self.ref}.K", Drive(Level.HIGH, Strength.PULL, v))
+            self.conducting = True
+            if self.power and v is not None:
+                self.power.set_rail_voltage(self.k.name, v)
+        else:
+            self.k.drive(f"{self.ref}.K", Drive.release())
+            self.conducting = False
 
 
 @register("passive.led")
@@ -79,7 +109,7 @@ class Led(Component):
 
     def start(self) -> None:
         self.anode = self.require_net("A", "2")
-        self.cathode = self.require_net("K", "1")
+        self.cathode = self.require_net("K", "C", "1")
         self.anode.listen(lambda _n: self._update())
         self.cathode.listen(lambda _n: self._update())
         self.lit = False

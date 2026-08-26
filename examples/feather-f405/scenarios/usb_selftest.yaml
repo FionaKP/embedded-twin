@@ -1,0 +1,37 @@
+# The real Adafruit Feather STM32F405 Express (Eagle schematic, unmodified),
+# powered from USB, running the self-test firmware.
+name: usb_selftest
+description: USB power-up, SPI flash JEDEC self-test, healthy 200 ms blink.
+duration: 3s
+seed: 5
+
+board:
+  netlist: ../hardware/feather_f405.sch
+  external_supplies: {VBUS: 5.0}
+  components:
+    U$3:
+      params:
+        profile: stm32f4
+        clock_hz: 16000000
+        slice_us: 1000
+        adc_vref: 3.3
+        spi:
+          - {periph: SPI1, sck: PB3, mosi: PB5, miso: PB4}
+    Q3: {model: power.pmos_loadswitch}
+    L:  {model: passive.led, params: {rail: "+3V3", i_on_ma: 1.2}}
+    CHG: {model: passive.led, params: {rail: VBUS, i_on_ma: 2.0}}
+    U3: {model: ""}   # MCP73831 charger: factory-generated model pending
+
+firmware:
+  U$3:
+    c: ../firmware/selftest.c
+
+assertions:
+  - {type: net_level, net: "+3V3", at: 50ms, equals: "1"}   # LDO up via D4+VHI
+  - {type: state_at_end, ref: U$3, state: running}
+  # healthy blink: 200 ms toggles -> ~15 edges in 3 s (error blink would be ~30)
+  - {type: transition_count, net: D13, after: 200ms, min: 12, max: 17}
+  # no battery on USB bench: D12 stays low
+  - {type: net_level, net: D12, at: 2s, equals: "0"}
+  - {type: power_budget, rail: VBUS, max_avg_ma: 20}
+  - {type: no_contention}

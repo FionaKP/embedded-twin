@@ -13,7 +13,7 @@ from typing import Any
 from ..build import BoardTwin, build_twin
 from ..core import Drive
 from ..env import Environment, Position, GnssWorld, CellularWorld, Tower, BleWorld
-from ..ingest import parse_kicad_netlist, merge_bom, bind_models
+from ..ingest import parse_design, merge_bom, bind_models
 from ..ir import BoardIR
 from .assertions import evaluate
 from .lockfile import make_lock
@@ -37,9 +37,22 @@ class ScenarioRun:
         if "ir" in cfg:
             board = BoardIR.from_json(self.scenario.resolve(cfg["ir"]).read_text())
         else:
-            board = parse_kicad_netlist(self.scenario.resolve(cfg["netlist"]))
+            board = parse_design(self.scenario.resolve(cfg["netlist"]))
             if cfg.get("bom"):
                 merge_bom(board, self.scenario.resolve(cfg["bom"]))
+        # bench harness: inject components the schematic doesn't carry
+        # (batteries on connectors, probes, stand-in loads)
+        from ..ir import ComponentIR, NetIR, NetNode
+        for add in cfg.get("add_components", []) or []:
+            comp = board.add_component(ComponentIR(
+                ref=add["ref"], model=add.get("model", ""),
+                params=add.get("params", {}),
+                pins={k: k for k in add.get("connect", {})}))
+            for pin, net_name in add.get("connect", {}).items():
+                net = board.nets.get(net_name)
+                if net is None:
+                    net = board.add_net(NetIR(name=net_name))
+                net.nodes.append(NetNode(ref=comp.ref, pin=pin))
         self.bind_report = bind_models(board)
         for ref, overrides in (cfg.get("components") or {}).items():
             comp = board.components[ref]

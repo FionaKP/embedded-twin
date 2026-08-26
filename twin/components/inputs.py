@@ -14,8 +14,10 @@ class Button(Component):
     """
 
     def start(self) -> None:
-        self.sig = self.require_net("1")
-        self.other = self.net("2")
+        self.sig = self.require_net("1", "P", "P1", "A")
+        self.other = self.net("2", "S", "S1", "B")
+        self._sig_pin = next(p for p in ("1", "P", "P1", "A")
+                             if self.net(p) is self.sig)
         self.pressed = False
         self.set_state("released")
 
@@ -23,13 +25,13 @@ class Button(Component):
         self.pressed = True
         self.set_state("pressed")
         if self.other is not None and self.other.net_class == "ground":
-            self.drive("1", Drive.low())
+            self.drive(self._sig_pin, Drive.low())
         elif self.other is not None and self.other.is_high:
-            self.drive("1", Drive.high(self.other.voltage))
+            self.drive(self._sig_pin, Drive.high(self.other.voltage))
         else:
-            self.drive("1", Drive.low())
+            self.drive(self._sig_pin, Drive.low())
 
     def release(self) -> None:
         self.pressed = False
         self.set_state("released")
-        self.drive("1", Drive.release())
+        self.drive(self._sig_pin, Drive.release())

@@ -23,8 +23,8 @@
 - [x] nRF52 profile: CLOCK, GPIO P0, UARTE0 with EasyDMA against emulated RAM
 - [x] More STM32 peripherals: SPI, I2C, ADC, TIM2-4, EXTI (DMA/RTC still open)
 - [x] Exception preemption/nesting + SVC/PendSV — unmodified FreeRTOS V11 runs (examples/freertos-blinky)
-- [ ] Altium/Eagle netlist ingest; KiCad PCB (.kicad_pcb) for copper-aware
-  thermal + current paths
+- [x] Eagle schematic ingest (real Adafruit Feather F405 runs end-to-end)
+- [ ] Altium ingest; KiCad PCB (.kicad_pcb) for copper-aware thermal + current paths
 - [ ] ngspice co-simulation engine for analog subcircuits
 
 ## v0.3 — the agentic model factory

@@ -1,0 +1,40 @@
+# Unplug USB: the P-FET power mux hands the board to the LiPo. Two hours
+# of simulated runtime; the battery is bench equipment (a JST connector on
+# the schematic), injected via add_components.
+name: battery_only
+description: LiPo-powered operation, battery detection via ADC, 2 h drain.
+duration: 2h
+seed: 9
+
+board:
+  netlist: ../hardware/feather_f405.sch
+  add_components:
+    - ref: BT1
+      model: power.battery
+      params: {capacity_mah: 500, r_internal: 0.15}
+      connect: {"+": VBAT, "-": GND}
+  components:
+    U$3:
+      params:
+        profile: stm32f4
+        clock_hz: 16000000
+        slice_us: 1000
+        adc_vref: 3.3
+        spi:
+          - {periph: SPI1, sck: PB3, mosi: PB5, miso: PB4}
+    Q3: {model: power.pmos_loadswitch}
+    L:  {model: passive.led, params: {rail: "+3V3", i_on_ma: 1.2}}
+    CHG: {model: passive.led, params: {rail: VBUS, i_on_ma: 2.0}}
+    U3: {model: ""}
+
+firmware:
+  U$3:
+    c: ../firmware/selftest.c
+
+assertions:
+  - {type: net_level, net: "+3V3", at: 50ms, equals: "1"}   # powered via Q3
+  - {type: net_level, net: D12, at: 2s, equals: "1"}        # battery detected
+  - {type: transition_count, net: D13, after: 200ms, before: 3s, min: 12, max: 17}
+  - {type: battery_soc_min, ref: BT1, min: 0.95}
+  - {type: power_budget, rail: VBAT, max_avg_ma: 8}
+  - {type: no_contention}

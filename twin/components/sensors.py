@@ -110,3 +110,76 @@ class AccelSpi(Component):
             return self.regs.get(addr, 0)
         self.regs[addr] = mosi
         return 0xFF
+
+
+@register("memory.spi_flash")
+class SpiFlash(Component):
+    """Generic SPI NOR flash (W25Q/GD25Q-class command subset).
+
+    Commands: 0x9F JEDEC ID, 0x05 read status, 0x06 WREN, 0x03 read
+    (24-bit address), 0x02 page program. Contents live in a sparse dict.
+    params: jedec (default [0xC8, 0x40, 0x15] = GD25Q16), i_active_ua (15)
+    """
+
+    def start(self) -> None:
+        sck = self.require_net("SCK", "CLK")
+        mosi = self.net("MOSI", "SDI", "DI", "IO0")
+        miso = self.net("MISO", "SDO", "DO", "IO1")
+        cs = self.require_net("CS", "SSEL", "NCS", "CS#", "!CS", "CS_N")
+        bus = SpiBus.on_nets(self.kernel, sck, mosi, miso)
+        bus.attach(cs, self)
+        self.jedec = list(self.params.get("jedec", [0xC8, 0x40, 0x15]))
+        self.mem: dict[int, int] = {}
+        self.wren = False
+        self._cmd = None
+        self._buf: list[int] = []
+        vdd = self.net("VCC", "VDD")
+        if vdd is not None:
+            self.set_load(vdd.name, self.params.get("i_active_ua", 15) * 1e-6)
+        self.set_state("ready")
+
+    # -- SPI device interface ---------------------------------------------
+    def spi_select(self, asserted: bool) -> None:
+        if asserted:
+            self._cmd = None
+            self._buf = []
+
+    def spi_transfer(self, mosi: int) -> int:
+        if self._cmd is None:
+            self._cmd = mosi
+            if self._cmd == 0x06:
+                self.wren = True
+            return 0xFF
+        self._buf.append(mosi)
+        n = len(self._buf)
+        if self._cmd == 0x9F:
+            return self.jedec[n - 1] if n <= len(self.jedec) else 0xFF
+        if self._cmd == 0x05:
+            return 0x00                       # never busy at event resolution
+        if self._cmd == 0x03 and n > 3:       # read after 3 address bytes
+            addr = (self._buf[0] << 16) | (self._buf[1] << 8) | self._buf[2]
+            return self.mem.get(addr + (n - 4), 0xFF)
+        if self._cmd == 0x02 and n > 3 and self.wren:
+            addr = (self._buf[0] << 16) | (self._buf[1] << 8) | self._buf[2]
+            self.mem[addr + (n - 4)] = mosi
+        return 0xFF
+
+
+@register("led.ws2812")
+class Ws2812(Component):
+    """Addressable RGB LED (NeoPixel) — power-accounted stub.
+
+    The 800 kHz single-wire protocol is bit-banged with sub-microsecond
+    timing the cycle-approximate CPU model cannot represent, so pixel data
+    is not decoded (FUTURE.md). Idle current is modeled; DI edges are
+    visible in the trace for probing.
+    params: i_idle_ma (0.7 per device), n (chain length, default 1)
+    """
+
+    def start(self) -> None:
+        vdd = self.net("VDD", "VCC", "5VDC")
+        if vdd is not None:
+            self.set_load(vdd.name,
+                          self.params.get("i_idle_ma", 0.7) * 1e-3
+                          * self.params.get("n", 1))
+        self.set_state("idle")

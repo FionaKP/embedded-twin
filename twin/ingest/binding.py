@@ -41,20 +41,32 @@ PART_TABLE: dict[str, str] = {
     "STM32": "mcu.cortex_m",
     "ATSAMD": "mcu.cortex_m",
     "NRF52": "mcu.cortex_m",
+    # memory
+    "W25Q": "memory.spi_flash",
+    "GD25Q": "memory.spi_flash",
+    "25Q": "memory.spi_flash",
+    # LEDs
+    "WS2812": "led.ws2812",
+    "SK6812": "led.ws2812",
 }
 
 _REFDES_TABLE: list[tuple[str, str]] = [
     ("LED", "passive.led"),
     ("SW", "input.button"),
     ("BT", "power.battery"),
+    ("FB", "passive.inductor"),   # ferrite beads: pass-through
+    ("TP", "connector.stub"),
+    ("JP", "connector.stub"),
     ("R", "passive.resistor"),
     ("C", "passive.capacitor"),
     ("L", "passive.inductor"),
     ("D", "passive.diode"),
     ("J", "connector.stub"),
     ("P", "connector.stub"),
-    ("TP", "connector.stub"),
-    ("U", ""),  # ICs must be identified, never guessed
+    ("X", "connector.stub"),      # connectors & crystals
+    ("Y", "connector.stub"),      # crystals (structural at event resolution)
+    ("Q", ""),                    # transistors must be identified
+    ("U", ""),                    # ICs must be identified, never guessed
 ]
 
 
@@ -65,13 +77,19 @@ def bind_models(board: BoardIR) -> dict:
         if comp.model:
             report["explicit"].append(comp.ref)
             continue
-        mpn = comp.part_number.upper()
-        if mpn:
+        # MPN from the BOM wins; the schematic value is the fallback (Eagle
+        # designs usually carry the part number in `value`)
+        for source in (comp.part_number, comp.value):
+            key = (source or "").upper()
+            if not key:
+                continue
             for prefix in sorted(PART_TABLE, key=len, reverse=True):
-                if mpn.startswith(prefix):
+                if key.startswith(prefix):
                     comp.model = PART_TABLE[prefix]
                     report["by_part_number"].append(comp.ref)
                     break
+            if comp.model:
+                break
         if comp.model:
             continue
         prefix = _refdes_prefix(comp.ref)

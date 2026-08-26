@@ -13,7 +13,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p_ingest = sub.add_parser("ingest", help="parse design files into Board IR")
-    p_ingest.add_argument("netlist", help="KiCad netlist (.net)")
+    p_ingest.add_argument("netlist", help="KiCad netlist (.net) or Eagle schematic (.sch)")
     p_ingest.add_argument("--bom", help="BOM CSV")
     p_ingest.add_argument("-o", "--out", help="write Board IR JSON here")
 
@@ -47,8 +47,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _ingest(args) -> int:
-    from .ingest import parse_kicad_netlist, merge_bom, bind_models
-    board = parse_kicad_netlist(args.netlist)
+    from .ingest import parse_design, merge_bom, bind_models
+    board = parse_design(args.netlist)
     missing = merge_bom(board, args.bom) if args.bom else []
     report = bind_models(board)
     print(f"board: {board.name}  components: {len(board.components)}  "

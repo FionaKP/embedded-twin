@@ -105,3 +105,46 @@ class Buck(_RegulatorBase):
 
     def _dissipate(self, out_a: float) -> float:
         return self.vout_v * out_a * (1 - self.eff) / max(self.eff, 0.1)
+
+
+@register("power.pmos_loadswitch")
+class PmosLoadSwitch(Component):
+    """P-MOSFET high-side switch / power mux (source follows drain when the
+    gate is pulled low — the classic USB-vs-battery ORing arrangement).
+
+    Pins: G (gate), D (drain, supply side), S (source, load side).
+    Conducts D->S when G is not high; registers a power-tree edge that
+    reflects the load only while conducting. params: r_on (ignored at
+    event resolution).
+    """
+
+    def start(self) -> None:
+        from ..core import Level, Strength
+        self._Level, self._Strength = Level, Strength
+        self.g = self.require_net("G")
+        self.d = self.require_net("D")
+        self.s = self.require_net("S")
+        self.on = False
+        self.g.listen(lambda _n: self._update())
+        self.d.listen(lambda _n: self._update())
+        if self.power and self.d.net_class == "power" and self.s.net_class == "power":
+            from ..power.engine import Regulator
+            self.power.add_regulator(Regulator(
+                self.ref, self.d.name, self.s.name,
+                reflect=lambda out_a: out_a if self.on else 0.0,
+                dissipate=lambda out_a: 0.0))
+        self._update()
+
+    def _update(self) -> None:
+        gate_off = self.g.is_high
+        if not gate_off and self.d.is_high:
+            v = self.d.voltage
+            self.s.drive(f"{self.ref}.S",
+                         Drive(self._Level.HIGH, self._Strength.PULL, v))
+            self.on = True
+            if self.power and v is not None:
+                self.power.set_rail_voltage(self.s.name, v)
+        else:
+            self.s.drive(f"{self.ref}.S", Drive.release())
+            self.on = False
+        self.set_state("on" if self.on else "off")

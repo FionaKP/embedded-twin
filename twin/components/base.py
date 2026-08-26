@@ -41,11 +41,27 @@ class Component:
 
     # -- pins -------------------------------------------------------------
     def net(self, *candidates: str) -> Optional[Net]:
-        """Net on the first matching pin name/number (case-insensitive)."""
+        """Net on the first matching pin name/number (case-insensitive).
+
+        Falls back to normalized names so decorated vendor pins match:
+        "PC1/ADC123_IN11(5T)" answers to "PC1", "VDD_1" to "VDD".
+        """
         lower = {k.lower(): v for k, v in self.pin_nets.items()}
         for c in candidates:
             if c.lower() in lower:
                 return lower[c.lower()]
+        norm = getattr(self, "_norm_pins", None)
+        if norm is None:
+            norm = {}
+            for k, v in self.pin_nets.items():
+                primary = k.split("/")[0].split("(")[0].strip()
+                for alias in (primary, primary.rstrip("_0123456789")
+                              if "_" in primary else primary):
+                    norm.setdefault(alias.lower(), v)
+            self._norm_pins = norm
+        for c in candidates:
+            if c.lower() in norm:
+                return norm[c.lower()]
         return None
 
     def require_net(self, *candidates: str) -> Net:
