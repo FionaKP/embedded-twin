@@ -14,3 +14,5 @@ Judged out-of-scope for the core mission of v0.1 (proof out an already-designed 
 | Hardware-in-the-loop bridging | Different mission (real hardware present) | Peripheral bus events could be mirrored to a serial/USB bridge |
 | Multi-board / mesh simulation | Single board first | Kernel supports multiple boards in one event queue by construction |
 | Fault injection library (bit flips, brownouts, connector intermittents) | Ringer needs to exist first | Stimuli timeline supports arbitrary net forcing — faults are stimuli presets |
+| Interrupt preemption/nesting, SVC/PendSV | v0.2 shipped single-level injection at slice boundaries (jitter ≤ slice, documented); RTOS kernels need the full model | Exception machinery is centralized in Armv7mSystem/UnicornMCU — nesting is a priority stack + BASEPRI checks in one place |
+| STM32 BRR-derived baud rates / clock-tree modeling | Sim baud comes from board wiring; clock tree is data with little troubleshooting value so far | UsartStm32 stores BRR; RCC stores every PLL register — a derivation pass can be added without firmware changes |

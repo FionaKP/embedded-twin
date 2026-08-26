@@ -1,5 +1,13 @@
-"""The MCU component: GPIO/UART/I2C/timer peripherals, power states, and
-two firmware backends — real binaries on Unicorn, or behavioral Python.
+"""The MCU component: peripherals, power states, and firmware backends.
+
+Profiles select the memory map the firmware was compiled for:
+- "twin" (default): the generic TwinMCU map (twin/cpu/memmap.py) — polled
+  I/O plus the CTRL_SLEEP_US fast-forward register.
+- "stm32f4": real STM32F405/407 addresses (RCC/GPIO/USART + SysTick/NVIC
+  interrupts + WFI-as-sleep) so register-level vendor firmware runs
+  unmodified — see twin/cpu/profiles/stm32f4.py.
+
+Behavioral Python firmware (McuApi) is profile-independent.
 """
 from __future__ import annotations
 
@@ -9,6 +17,7 @@ from ..comm import Uart, I2CBus
 from ..core import Drive
 from ..core.kernel import US
 from ..cpu import memmap as mm
+from ..cpu.armv7m import Armv7mSystem
 from ..cpu.unicorn_backend import UnicornMCU
 from .base import Component, register
 
@@ -19,20 +28,23 @@ _POWER_PIN_NAMES = {"VDD", "VSS", "VCC", "GND", "VBAT", "VDDA", "VSSA",
 @register("mcu.cortex_m")
 class CortexM(Component):
     """params:
-    clock_hz (16 MHz), slice_us (1000), pinmap {pin_name: bit},
-    uarts [{tx, rx, baud}], i2c [{scl, sda}],
-    firmware (path to flat .bin or .elf),
+    profile ("twin"|"stm32f4"), clock_hz (16 MHz), slice_us (1000),
+    pinmap {pin_name: bit} (twin profile),
+    uarts [{tx, rx, baud[, periph]}] (periph e.g. "USART2" for stm32f4),
+    i2c [{scl, sda}], firmware (path to flat .bin or .elf),
     i_run_ua_per_mhz (150), i_sleep_ua (50)
     """
 
     def start(self) -> None:
         p = self.params
+        self.profile_name = p.get("profile", "twin")
         self.clock_hz = int(p.get("clock_hz", 16_000_000))
         self.vdd = self.net("VDD", "VCC", "3V3")
         self.vdd_v = (self.vdd.voltage if self.vdd is not None and self.vdd.voltage else 3.3)
         self.rail = self.vdd.name if self.vdd is not None else ""
 
-        # GPIO: pin name <-> bit index
+        # GPIO (twin profile: pin name <-> bit index; vendor profiles drive
+        # nets by pin name directly through gpio_drive/gpio_release)
         self.pinmap: dict[str, int] = dict(p.get("pinmap", {}))
         if not self.pinmap:
             gpio_names = sorted(
@@ -43,7 +55,13 @@ class CortexM(Component):
         self.gpio_out = 0
         self.gpio_dir = 0
 
-        # inputs matter to firmware; keep IN sampling lazy (read on demand)
+        # vendor profile (built before UARTs so ports can bind to it)
+        self.profile = None
+        self.system: Optional[Armv7mSystem] = None
+        if self.profile_name != "twin":
+            from ..cpu.profiles import PROFILES
+            self.profile = PROFILES[self.profile_name](self)
+            self.system = Armv7mSystem(self.clock_hz, log=self.log)
 
         # UARTs
         self.uarts: list[Uart] = []
@@ -54,9 +72,15 @@ class CortexM(Component):
                         rx_net=self.net(u["rx"]) if u.get("rx") else None,
                         baud=int(u.get("baud", 115200)))
             fifo: list[int] = []
-            port.on_byte(fifo.append)
             self.uarts.append(port)
             self._uart_rx.append(fifo)
+            usart = self.profile.usarts.get(u["periph"]) if (
+                self.profile and u.get("periph")) else None
+            if usart is not None:
+                usart.port = port
+                port.on_byte(usart.on_rx)
+            else:
+                port.on_byte(fifo.append)
 
         # I2C masters
         self.i2c_buses: list[I2CBus] = []
@@ -73,6 +97,7 @@ class CortexM(Component):
         self.backend: Optional[UnicornMCU] = None
         self._dbg_buf = bytearray()
         self._sleep_until = 0
+        self._sleeping = False
         self.slice_ns = int(p.get("slice_us", 1000)) * US
         fw = p.get("firmware")
         if fw:
@@ -104,30 +129,59 @@ class CortexM(Component):
         net = self.net(pin)
         return 1 if (net is not None and net.is_high) else 0
 
+    def gpio_drive(self, pin: str, value: int) -> None:
+        net = self.net(pin)
+        if net is not None:
+            net.drive(f"{self.ref}.{pin}",
+                      Drive.high(self.vdd_v) if value else Drive.low())
+
+    def gpio_release(self, pin: str) -> None:
+        net = self.net(pin)
+        if net is not None:
+            net.drive(f"{self.ref}.{pin}", Drive.release())
+
     def _drive_bit(self, bit: int) -> None:
         pin = self.bit_to_pin.get(bit)
-        net = self.net(pin) if pin else None
-        if net is None:
+        if pin is None:
             return
         if not (self.gpio_dir >> bit) & 1:
-            net.drive(f"{self.ref}.{pin}", Drive.release())
+            self.gpio_release(pin)
         elif (self.gpio_out >> bit) & 1:
-            net.drive(f"{self.ref}.{pin}", Drive.high(self.vdd_v))
+            self.gpio_drive(pin, 1)
         else:
-            net.drive(f"{self.ref}.{pin}", Drive.low())
+            self.gpio_drive(pin, 0)
 
     def _gpio_in_word(self) -> int:
         word = 0
         for name, bit in self.pinmap.items():
-            net = self.net(name)
-            if net is not None and net.is_high:
+            if self.gpio_read(name):
                 word |= (1 << bit)
         return word
 
+    # -- interrupts (vendor profiles) --------------------------------------
+    def pend_irq(self, irq: int) -> None:
+        if self.system is not None and self.system.pend_irq(irq) and self._sleeping:
+            self._wake_now()
+
+    def _wake_now(self) -> None:
+        if self._sleeping:
+            self._sleeping = False
+            self.set_power_state("run")
+            self.kernel.schedule(0, self._run_slice)
+
     # -- Unicorn firmware -------------------------------------------------
     def load_firmware(self, fw) -> None:
-        self.backend = UnicornMCU(self.clock_hz, self._periph_read,
-                                  self._periph_write, slice_ns=self.slice_ns)
+        if self.profile is not None:
+            self.backend = UnicornMCU(
+                self.clock_hz, self._bus_read, self._bus_write,
+                slice_ns=self.slice_ns,
+                flash=(self.profile.flash_base, self.profile.flash_size),
+                ram_regions=self.profile.ram_regions,
+                periph_window=(self.profile.periph_base, self.profile.periph_size),
+                system=self.system, log=self.log)
+        else:
+            self.backend = UnicornMCU(self.clock_hz, self._twin_read,
+                                      self._twin_write, slice_ns=self.slice_ns)
         if isinstance(fw, (bytes, bytearray)):
             self.backend.load_bin(bytes(fw))
         elif str(fw).endswith(".elf"):
@@ -140,28 +194,52 @@ class CortexM(Component):
         be = self.backend
         if be is None or be.halted:
             return
+        if self.system is not None:
+            self.system.advance(self.kernel.now)
+        # keep SysTick jitter below one period by shortening slices
+        ns = self.slice_ns
+        if self.system is not None and self.system.systick.enabled:
+            ns = min(ns, self.system.systick.period_ns())
         try:
-            be.run_slice()
+            status = be.run_slice(ns)
         except RuntimeError as e:
             self.log(f"FAULT: {e}")
             self.set_state("faulted")
             self.set_power_state("off")
             return
-        if be.halted:
+
+        if status == "halted":
             self.set_state("halted")
             self.set_power_state("off")
-            return
-        if self._sleep_until > self.kernel.now:
+        elif status == "wfi":
+            wake = self.system.next_wake_ns() if self.system else None
+            self._sleeping = True
             self.set_power_state("sleep")
-            self.kernel.schedule_at(self._sleep_until, self._wake)
+            if wake is not None:
+                self.kernel.schedule_at(max(wake, self.kernel.now), self._wake_now)
+            # else: stay asleep until an interrupt (e.g. UART RX) pends
+        elif status == "reset":
+            self.log("MCU reset (SYSRESETREQ)")
+            self.kernel.schedule(0, self._run_slice)
+        elif self._sleep_until > self.kernel.now:   # legacy CTRL_SLEEP_US
+            self.set_power_state("sleep")
+            self.kernel.schedule_at(self._sleep_until, self._legacy_wake)
         else:
-            self.kernel.schedule(self.slice_ns, self._run_slice)
+            self.kernel.schedule(ns, self._run_slice)
 
-    def _wake(self) -> None:
+    def _legacy_wake(self) -> None:
         self.set_power_state("run")
         self._run_slice()
 
-    def _periph_read(self, addr: int) -> int:
+    # -- peripheral dispatch: vendor profile bus ---------------------------
+    def _bus_read(self, addr: int, size: int) -> int:
+        return self.profile.bus.read(addr, size)
+
+    def _bus_write(self, addr: int, value: int, size: int) -> None:
+        self.profile.bus.write(addr, value, size)
+
+    # -- peripheral dispatch: legacy TwinMCU map ---------------------------
+    def _twin_read(self, addr: int, size: int) -> int:
         if addr == mm.GPIO_IN:
             return self._gpio_in_word()
         if addr == mm.GPIO_OUT:
@@ -177,7 +255,7 @@ class CortexM(Component):
             return (self.kernel.now // US) & 0xFFFFFFFF
         return 0
 
-    def _periph_write(self, addr: int, value: int) -> None:
+    def _twin_write(self, addr: int, value: int, size: int) -> None:
         if addr == mm.GPIO_OUT:
             changed = self.gpio_out ^ value
             self.gpio_out = value
@@ -191,9 +269,9 @@ class CortexM(Component):
                 if (changed >> bit) & 1:
                     self._drive_bit(bit)
         elif addr == mm.GPIO_SET:
-            self._periph_write(mm.GPIO_OUT, self.gpio_out | value)
+            self._twin_write(mm.GPIO_OUT, self.gpio_out | value, size)
         elif addr == mm.GPIO_CLR:
-            self._periph_write(mm.GPIO_OUT, self.gpio_out & ~value)
+            self._twin_write(mm.GPIO_OUT, self.gpio_out & ~value, size)
         elif addr == mm.UART0_DR:
             if self.uarts:
                 self.uarts[0].send(bytes([value & 0xFF]))

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>embedded-twin — trace viewer</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header id="hdr">
+    <div class="hdr-brand">
+      <span class="hdr-logo">embedded-twin</span>
+      <span class="hdr-sub">trace viewer</span>
+    </div>
+    <div class="hdr-meta" id="hdr-meta"></div>
+  </header>
+
+  <nav id="tabs">
+    <button class="tab active" data-tab="waves">Waveforms</button>
+    <button class="tab" data-tab="power">Power</button>
+    <button class="tab" data-tab="serial">Serial</button>
+    <button class="tab" data-tab="asserts">Assertions</button>
+    <button class="tab" data-tab="logs">Logs &amp; Events</button>
+  </nav>
+
+  <main id="main">
+    <section class="panel active" id="panel-waves">
+      <aside id="wave-side">
+        <div id="net-picker"></div>
+        <details id="components-box">
+          <summary>Board components</summary>
+          <div id="components-table"></div>
+        </details>
+      </aside>
+      <div id="wave-main">
+        <div id="wave-toolbar">
+          <button id="btn-fit" title="Fit whole trace (double-click also fits)">Fit</button>
+          <button id="btn-zoom-in" title="Zoom in">+</button>
+          <button id="btn-zoom-out" title="Zoom out">&minus;</button>
+          <span id="wave-range" class="mono"></span>
+          <span class="toolbar-hint">wheel: zoom &middot; drag: pan &middot; double-click: fit</span>
+        </div>
+        <div id="wave-scroll">
+          <canvas id="wave-canvas"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-power">
+      <div id="power-charts"></div>
+    </section>
+
+    <section class="panel" id="panel-serial">
+      <nav id="serial-tabs"></nav>
+      <div id="serial-consoles"></div>
+    </section>
+
+    <section class="panel" id="panel-asserts">
+      <div id="asserts-summary"></div>
+      <table id="asserts-table">
+        <thead><tr><th></th><th>Type</th><th>Evidence</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="panel" id="panel-logs">
+      <div id="log-list"></div>
+    </section>
+  </main>
+
+  <div id="load-error" hidden>
+    <h2>Could not load trace.json</h2>
+    <p>Serve this page next to a <span class="mono">trace.json</span> file
+       (e.g. <span class="mono">twin view</span>, or
+       <span class="mono">python3 -m http.server</span> in the output directory).</p>
+    <p id="load-error-detail" class="mono"></p>
+  </div>
+</body>
+</html>
