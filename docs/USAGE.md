@@ -54,6 +54,18 @@ points at a Python function `main(api)` — see `McuApi` in
 `twin/components/mcu.py` and the asset-tracker example. Same board, same
 scenarios; swap in the real binary later without touching the tests.
 
+**Vendor profiles**: set `params: {profile: stm32f4}` on the MCU and
+register-level STM32F405/407 firmware runs unmodified — RCC (clocks report
+ready), GPIOA–E, USART1/2/6, SysTick/NVIC interrupts, WFI as sleep (the
+power engine sees it). Bind a USART to board wiring with
+`uarts: [{periph: USART2, tx: PA2, rx: PA3, baud: 9600}]`.
+Interrupt latency is bounded by `slice_us` (default 1 ms, auto-shortened
+to the SysTick period); no preemption/nesting yet — see ROADMAP.
+
+**C source, no toolchain**: `firmware: {U1: {c: ../firmware/main.c}}`
+compiles the file on the fly against the MCU's profile using the zig
+toolchain (`pip install ziglang`) — see examples/stm32-button-led.
+
 ## 4. Probe anything
 
 Every net transition, UART byte, I2C transaction, state change, and power
