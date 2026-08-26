@@ -10,8 +10,9 @@ The mission: **lower the technical barrier for embedded teams** by making it pos
 
 - **Ingest** a KiCad netlist + BOM into a canonical Board IR (intermediate representation)
 - **Simulate** the board with a discrete-event kernel: nets resolve multi-driver conflicts, pull-ups, hi-Z, analog levels
-- **Execute firmware** two ways:
-  - real ARM Cortex-M binaries via the Unicorn engine, with memory-mapped peripherals (GPIO, UART, SysTick)
+- **Execute firmware** three ways:
+  - real ARM Cortex-M binaries via the Unicorn engine — including **unmodified register-level STM32F4 and nRF52 firmware** (RCC/GPIO/USART, task/event UARTE with EasyDMA, SysTick/NVIC interrupts, WFI as sleep)
+  - C source compiled on the fly (`firmware: {U1: {c: main.c}}`) with the pip-installable zig toolchain — no system cross-compiler needed
   - behavioral firmware written in Python, for pre-silicon / pre-firmware proofing
 - **Account for power**: state-based current models per component, rail accounting, battery state-of-charge, and a thermal RC model
 - **Simulate the environment**:
@@ -20,6 +21,7 @@ The mission: **lower the technical barrier for embedded teams** by making it pos
   - BLE: connection lifecycle, supervision timeouts, interference
 - **Run scenarios**: YAML-defined test scenarios ("the testing ringer") with stimuli timelines and assertions on pins, UART traffic, power budgets, and state — producing JSON + Markdown reports
 - **Trace to design revision**: every run records a lockfile of input hashes (netlist, firmware, models) so results map to an exact design state
+- **See it**: `twin run … --trace` + `twin view` opens a browser trace viewer — logic-analyzer waveforms with zoom/pan, state-machine and UART lanes, power/battery/thermal dashboards, serial consoles, assertion evidence
 
 ## Quickstart
 
@@ -38,11 +40,13 @@ twin/            the simulation platform (Python package)
   ir/            Board IR: components, pins, nets, rails
   ingest/        design-file parsers (KiCad netlist, BOM CSV)
   components/    component model SDK + standard model library
-  cpu/           firmware execution (Unicorn ARM backend, behavioral backend)
+  cpu/           firmware execution: Unicorn backend, ARMv7-M system layer,
+                 vendor profiles (stm32f4, nrf52), zig C toolchain
   power/         power + thermal engine
   env/           environment simulators (GNSS, cellular, BLE)
-  scenario/      scenario engine, assertions, reports
+  scenario/      scenario engine, assertions, reports, trace export
+ui/              browser trace viewer (twin view) — zero dependencies
 docs/            architecture, roadmap, ADRs
-examples/        practice projects (asset-tracker demo board)
+examples/        asset-tracker (system demo), stm32-button-led (real C fw)
 tests/           pytest suite
 ```
