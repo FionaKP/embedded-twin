@@ -37,7 +37,11 @@ _SCB_CPUID = 0xED00
 _SCB_ICSR = 0xED04
 _SCB_VTOR = 0xED08
 _SCB_AIRCR = 0xED0C
+_SCB_SHPR1 = 0xED18   # SHPR1..3: system handler priorities (exc 4..15)
+_NVIC_IPR = 0xE400    # external IRQ priorities, one byte per IRQ
 
+EXC_SVC = 11
+EXC_PENDSV = 14
 EXC_SYSTICK = 15
 IRQ0_EXC = 16  # external IRQ n -> exception number 16+n
 
@@ -93,12 +97,53 @@ class Armv7mSystem:
         self.systick = SysTick(clock_hz)
         self.nvic_enabled = 0          # bitmask over 96 IRQs (banked regs)
         self.pending: set[int] = set() # exception numbers (15 = systick, 16+n = IRQ n)
-        self.active: list[int] = []    # nested exception stack
+        self.active: list[tuple[int, int]] = []  # nested (exc, priority) stack
         self.vtor = 0
         self.regs: dict[int, int] = {} # storage for everything else
         self.log = log
         self.now = 0
         self.reset_requested = False
+
+    # -- priorities (8-bit, lower value = higher priority) -----------------
+    def priority_of(self, exc: int) -> int:
+        if exc >= IRQ0_EXC:
+            off = _NVIC_IPR + (exc - IRQ0_EXC)
+        elif 4 <= exc <= 15:
+            off = _SCB_SHPR1 + (exc - 4)
+        else:
+            return 0
+        word = self.regs.get(off & ~3, 0)
+        return (word >> ((off & 3) * 8)) & 0xFF
+
+    def active_priority(self) -> int:
+        return min((pri for _exc, pri in self.active), default=256)
+
+    def _injectable(self, exc: int, basepri: int, primask: int) -> bool:
+        if exc >= IRQ0_EXC and not (self.nvic_enabled >> (exc - IRQ0_EXC)) & 1:
+            return False
+        if primask & 1:
+            return False
+        pri = self.priority_of(exc)
+        if basepri and pri >= basepri:
+            return False
+        return pri < self.active_priority()
+
+    def take_pending(self, basepri: int = 0, primask: int = 0) -> Optional[int]:
+        """Best pending exception allowed to run now (preemption-aware)."""
+        best = None
+        for exc in self.pending:
+            if not self._injectable(exc, basepri, primask):
+                continue
+            key = (self.priority_of(exc), exc)
+            if best is None or key < best:
+                best = key
+        if best is None:
+            return None
+        self.pending.discard(best[1])
+        return best[1]
+
+    def has_injectable(self, basepri: int = 0, primask: int = 0) -> bool:
+        return any(self._injectable(e, basepri, primask) for e in self.pending)
 
     # -- time -------------------------------------------------------------
     def advance(self, now: int) -> None:
@@ -118,18 +163,11 @@ class Armv7mSystem:
         self.pending.add(IRQ0_EXC + irq)
         return bool((self.nvic_enabled >> irq) & 1)
 
-    def take_pending(self) -> Optional[int]:
-        """Highest-priority pending, enabled exception (no nesting/preemption)."""
-        if self.active:
-            return None
-        for exc in sorted(self.pending):
-            if exc < IRQ0_EXC or (self.nvic_enabled >> (exc - IRQ0_EXC)) & 1:
-                self.pending.discard(exc)
-                return exc
-        return None
-
     # -- register file ----------------------------------------------------
     def read(self, addr: int, size: int) -> int:
+        if size < 4:  # sub-word access: extract from the aligned word
+            word = self.read(addr & ~3, 4)
+            return (word >> ((addr & 3) * 8)) & ((1 << (8 * size)) - 1)
         off = addr - 0xE000_0000
         if off == _SYST_CSR:
             v = self.systick.csr | 0x4  # CLKSOURCE reads as core clock
@@ -163,13 +201,21 @@ class Armv7mSystem:
         if off == _SCB_AIRCR:
             return 0xFA05_0000
         if off == _SCB_ICSR:
-            v = self.active[-1] if self.active else 0
+            v = self.active[-1][0] if self.active else 0
             if EXC_SYSTICK in self.pending:
                 v |= 1 << 26
+            if EXC_PENDSV in self.pending:
+                v |= 1 << 28
             return v
         return self.regs.get(off, 0)
 
     def write(self, addr: int, value: int, size: int) -> None:
+        if size < 4:  # sub-word store: merge into the aligned word
+            shift = (addr & 3) * 8
+            mask = ((1 << (8 * size)) - 1) << shift
+            cur = self.read(addr & ~3, 4)
+            self.write(addr & ~3, (cur & ~mask) | ((value << shift) & mask), 4)
+            return
         off = addr - 0xE000_0000
         if off == _SYST_CSR:
             self.systick.write_csr(value, self.now)
@@ -196,6 +242,12 @@ class Armv7mSystem:
         elif off == _SCB_ICSR:
             if value & (1 << 26):   # PENDSTSET
                 self.pending.add(EXC_SYSTICK)
+            if value & (1 << 25):   # PENDSTCLR
+                self.pending.discard(EXC_SYSTICK)
+            if value & (1 << 28):   # PENDSVSET
+                self.pending.add(EXC_PENDSV)
+            if value & (1 << 27):   # PENDSVCLR
+                self.pending.discard(EXC_PENDSV)
         elif off == _SCB_AIRCR:
             if value & (1 << 2):    # SYSRESETREQ
                 self.reset_requested = True
@@ -207,11 +259,18 @@ class Armv7mSystem:
 # -- Thumb load/store mini-decoder (for SCS access fixup) ------------------
 
 class DecodedMemOp:
-    __slots__ = ("is_load", "rt", "rn", "rm", "imm", "size", "width")
+    __slots__ = ("is_load", "rt", "rn", "rm", "rm_shift", "imm", "size",
+                 "width", "post", "wback")
 
-    def __init__(self, is_load, rt, rn, imm, size, width, rm=None):
+    def __init__(self, is_load, rt, rn, imm, size, width, rm=None,
+                 rm_shift=0, post=False, wback=False):
         self.is_load, self.rt, self.rn, self.rm = is_load, rt, rn, rm
+        self.rm_shift = rm_shift
         self.imm, self.size, self.width = imm, size, width
+        self.post, self.wback = post, wback
+
+    def offset(self, rm_value: int = 0) -> int:
+        return (rm_value << self.rm_shift) if self.rm is not None else self.imm
 
 
 def decode_mem_op(code: bytes) -> Optional[DecodedMemOp]:
@@ -230,15 +289,25 @@ def decode_mem_op(code: bytes) -> Optional[DecodedMemOp]:
     if (hw1 & 0xFE00) in (0x5000, 0x5800):  # STR/LDR rt, [rn, rm]
         return DecodedMemOp((hw1 & 0xFE00) == 0x5800, hw1 & 7, (hw1 >> 3) & 7,
                             0, 4, 2, rm=(hw1 >> 6) & 7)
-    if len(code) >= 4:
+    if len(code) >= 4 and (hw1 & 0xFE00) == 0xF800:
+        # Thumb-2 single load/store: 1111 100 F size L rn
         hw2 = struct.unpack_from("<H", code, 2)[0]
-        if (hw1 & 0xFFF0) in (0xF8C0, 0xF8D0):  # STR.W/LDR.W rt,[rn,#imm12]
-            return DecodedMemOp((hw1 & 0x10) != 0, (hw2 >> 12) & 0xF,
-                                hw1 & 0xF, hw2 & 0xFFF, 4, 4)
-        if (hw1 & 0xFFF0) in (0xF880, 0xF890):  # STRB.W/LDRB.W imm12
-            return DecodedMemOp((hw1 & 0x10) != 0, (hw2 >> 12) & 0xF,
-                                hw1 & 0xF, hw2 & 0xFFF, 1, 4)
-        if (hw1 & 0xFFF0) in (0xF8A0, 0xF8B0):  # STRH.W/LDRH.W imm12
-            return DecodedMemOp((hw1 & 0x10) != 0, (hw2 >> 12) & 0xF,
-                                hw1 & 0xF, hw2 & 0xFFF, 2, 4)
+        size = {0: 1, 1: 2, 2: 4}.get((hw1 >> 5) & 3)
+        if size is None:
+            return None
+        is_load = bool(hw1 & 0x10)
+        rn, rt = hw1 & 0xF, (hw2 >> 12) & 0xF
+        if hw1 & 0x80:                      # T3: [rn, #imm12]
+            return DecodedMemOp(is_load, rt, rn, hw2 & 0xFFF, size, 4)
+        if hw2 & 0x0800:                    # T4: [rn, #±imm8], pre/post, wback
+            imm = hw2 & 0xFF
+            if not (hw2 & 0x0200):          # U=0: negative offset
+                imm = -imm
+            pre = bool(hw2 & 0x0400)
+            wback = bool(hw2 & 0x0100)
+            return DecodedMemOp(is_load, rt, rn, imm, size, 4,
+                                post=not pre, wback=wback)
+        if (hw2 & 0x0FC0) == 0:             # register: [rn, rm, lsl #n]
+            return DecodedMemOp(is_load, rt, rn, 0, size, 4,
+                                rm=hw2 & 0xF, rm_shift=(hw2 >> 4) & 3)
     return None

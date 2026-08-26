@@ -125,7 +125,6 @@ class UnicornMCU:
         if self.halted:
             return "halted"
         if self.system is not None:
-            self._maybe_inject()
             if self.system.reset_requested:
                 self.system.reset_requested = False
                 vec = bytes(self.uc.mem_read(self.flash[0], 8))
@@ -133,14 +132,15 @@ class UnicornMCU:
                 return "reset"
         ns = self.slice_ns if slice_ns is None else slice_ns
         count = max(1, int(self.clock_hz * ns / 1_000_000_000))
-        budget = 8  # SCS fixups etc. may interrupt the slice several times
+        budget = 64  # SCS fixups / SVCs / returns can interrupt a slice often
         while budget:
             budget -= 1
+            self._maybe_inject()  # also tail-chains after exception returns
             try:
                 self.uc.emu_start(self.pc, 0xFFFFFFFE, count=count)
             except UcError as e:
                 if self._handle_fault(e):
-                    continue     # serviced (SCS access / exception return)
+                    continue     # serviced (SCS access / SVC / exception return)
                 raise RuntimeError(
                     f"firmware fault at pc={self.uc.reg_read(A.UC_ARM_REG_PC):#010x}: {e}"
                 ) from None
@@ -168,8 +168,27 @@ class UnicornMCU:
     def _handle_fault(self, err: UcError) -> bool:
         pc = self.uc.reg_read(A.UC_ARM_REG_PC)
         if (pc & 0xFFFFFF00) == 0xFFFFFF00:
-            return self._exception_return()
+            return self._exception_return(pc)
+        if self._was_svc(pc):
+            return self._svc_entry(pc)
         return self._scs_fixup(pc)
+
+    def _was_svc(self, pc: int) -> bool:
+        """PC sits just after an `svc #imm` (Unicorn advances PC before
+        raising UC_ERR_EXCEPTION for it)."""
+        try:
+            hw = struct.unpack("<H", bytes(self.uc.mem_read((pc & ~1) - 2, 2)))[0]
+        except UcError:
+            return False
+        return (hw & 0xFF00) == 0xDF00
+
+    def _svc_entry(self, pc: int) -> bool:
+        """Synchronous SVCall: taken immediately (exception 11)."""
+        if self.system is None:
+            return False
+        self.pc = pc | 1     # return address = after the svc
+        self._enter_exception(11)
+        return True
 
     def _scs_fixup(self, pc: int) -> bool:
         if self.system is None:
@@ -182,8 +201,9 @@ class UnicornMCU:
         op = decode_mem_op(code)
         if op is None:
             return False
-        addr = self.uc.reg_read(_GPR[op.rn]) + (
-            self.uc.reg_read(_GPR[op.rm]) if op.rm is not None else op.imm)
+        base = self.uc.reg_read(_GPR[op.rn])
+        offset = op.offset(self.uc.reg_read(_GPR[op.rm]) if op.rm is not None else 0)
+        addr = (base if op.post else base + offset) & 0xFFFFFFFF
         if not (SCS_BASE <= addr < SCS_END):
             return False
         if op.is_load:
@@ -192,19 +212,40 @@ class UnicornMCU:
         else:
             val = self.uc.reg_read(_GPR[op.rt]) & ((1 << (8 * op.size)) - 1)
             self.system.write(addr, val, op.size)
+        if op.post or op.wback:
+            self.uc.reg_write(_GPR[op.rn], (base + offset) & 0xFFFFFFFF)
         self.pc = (pc + op.width) | 1
         return True
 
-    # -- exception machinery (ARMv7-M B1.5) --------------------------------
+    # -- exception machinery (ARMv7-M B1.5, banked MSP/PSP) ----------------
+    def _mask_state(self) -> tuple[int, int]:
+        primask = self.uc.reg_read(_PRIMASK_REG) if _PRIMASK_REG is not None else 0
+        basepri = (self.uc.reg_read(A.UC_ARM_REG_BASEPRI)
+                   if hasattr(A, "UC_ARM_REG_BASEPRI") else 0)
+        return basepri & 0xFF, primask & 1
+
+    def can_wake(self) -> bool:
+        """Is there a pending exception that would run right now? (WFI exit)"""
+        if self.system is None:
+            return False
+        basepri, primask = self._mask_state()
+        return self.system.has_injectable(basepri, primask)
+
     def _maybe_inject(self) -> None:
         if self.system is None:
             return
-        if _PRIMASK_REG is not None and self.uc.reg_read(_PRIMASK_REG) & 1:
-            return  # interrupts masked; stays pending
-        exc = self.system.take_pending()
-        if exc is None:
-            return
-        sp = self.uc.reg_read(A.UC_ARM_REG_SP)
+        basepri, primask = self._mask_state()
+        exc = self.system.take_pending(basepri, primask)
+        if exc is not None:
+            self._enter_exception(exc)
+
+    def _enter_exception(self, exc: int) -> None:
+        sys_ = self.system
+        control = self.uc.reg_read(A.UC_ARM_REG_CONTROL)
+        in_handler = bool(sys_.active)
+        on_psp = (not in_handler) and bool(control & 2)
+
+        sp = self.uc.reg_read(A.UC_ARM_REG_PSP if on_psp else A.UC_ARM_REG_MSP)
         xpsr = self.uc.reg_read(A.UC_ARM_REG_XPSR)
         align = 0
         if sp & 7:
@@ -218,18 +259,33 @@ class UnicornMCU:
             self.uc.reg_read(A.UC_ARM_REG_R12), self.uc.reg_read(A.UC_ARM_REG_LR),
             self.pc & ~1, (xpsr | (align << 9)) & 0xFFFFFFFF)
         self.uc.mem_write(sp, frame)
-        self.uc.reg_write(A.UC_ARM_REG_SP, sp)
-        self.uc.reg_write(A.UC_ARM_REG_LR, 0xFFFFFFF9)
+        self.uc.reg_write(A.UC_ARM_REG_PSP if on_psp else A.UC_ARM_REG_MSP, sp)
+
+        if in_handler:
+            exc_return = 0xFFFFFFF1
+        elif on_psp:
+            exc_return = 0xFFFFFFFD
+            # handlers always run on MSP: clear SPSEL (re-banks SP)
+            self.uc.reg_write(A.UC_ARM_REG_CONTROL, control & ~2)
+        else:
+            exc_return = 0xFFFFFFF9
+        self.uc.reg_write(A.UC_ARM_REG_LR, exc_return)
         self.uc.reg_write(A.UC_ARM_REG_XPSR, 0x01000000 | exc)
-        vec = self.system.vtor + exc * 4
+        vec = sys_.vtor + exc * 4
         handler = struct.unpack("<I", bytes(self.uc.mem_read(vec, 4)))[0]
         self.pc = handler | 1
-        self.system.active.append(exc)
+        sys_.active.append((exc, sys_.priority_of(exc)))
 
-    def _exception_return(self) -> bool:
+    def _exception_return(self, exc_return: int) -> bool:
         if self.system is None or not self.system.active:
             return False
-        sp = self.uc.reg_read(A.UC_ARM_REG_SP)
+        # NB: unicorn strips bit0 of the magic PC (0xFFFFFFFD reads as ...FC),
+        # so decode the architectural bits: bit2 = return stack (1 = PSP),
+        # bit3 = return mode (1 = thread)
+        to_psp = bool(exc_return & 0x4)
+        to_thread = bool(exc_return & 0x8)
+        sp_reg = A.UC_ARM_REG_PSP if to_psp else A.UC_ARM_REG_MSP
+        sp = self.uc.reg_read(sp_reg)
         r0, r1, r2, r3, r12, lr, ret, xpsr = struct.unpack(
             "<8I", bytes(self.uc.mem_read(sp, 32)))
         sp += 32
@@ -237,12 +293,17 @@ class UnicornMCU:
             sp += 4
         for reg, val in ((A.UC_ARM_REG_R0, r0), (A.UC_ARM_REG_R1, r1),
                          (A.UC_ARM_REG_R2, r2), (A.UC_ARM_REG_R3, r3),
-                         (A.UC_ARM_REG_R12, r12), (A.UC_ARM_REG_LR, lr),
-                         (A.UC_ARM_REG_SP, sp)):
+                         (A.UC_ARM_REG_R12, r12), (A.UC_ARM_REG_LR, lr)):
             self.uc.reg_write(reg, val)
+        self.uc.reg_write(sp_reg, sp)
+        control = self.uc.reg_read(A.UC_ARM_REG_CONTROL)
+        self.system.active.pop()
+        # thread-mode return selects the stack; nested return stays on MSP
+        if to_thread:
+            new_control = (control | 2) if to_psp else (control & ~2)
+            self.uc.reg_write(A.UC_ARM_REG_CONTROL, new_control)
         self.uc.reg_write(A.UC_ARM_REG_XPSR, xpsr & ~(1 << 9))
         self.pc = ret | 1
-        self.system.active.pop()
         return True
 
     # -- misc --------------------------------------------------------------

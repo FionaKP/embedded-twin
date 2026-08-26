@@ -7,3 +7,4 @@ build/
 .pytest_cache/
 .DS_Store
 out/
+examples/freertos-blinky/kernel/

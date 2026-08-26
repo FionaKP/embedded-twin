@@ -212,6 +212,10 @@ class CortexM(Component):
             self.set_state("halted")
             self.set_power_state("off")
         elif status == "wfi":
+            if self.backend.can_wake():
+                # an interrupt is already pending and unmasked: no sleep
+                self.kernel.schedule(0, self._run_slice)
+                return
             wake = self.system.next_wake_ns() if self.system else None
             self._sleeping = True
             self.set_power_state("sleep")
