@@ -21,8 +21,8 @@
   toolchain)
 - [x] Run viewer UI: waveforms, power dashboards, serial consoles (twin view)
 - [x] nRF52 profile: CLOCK, GPIO P0, UARTE0 with EasyDMA against emulated RAM
-- [ ] More STM32 peripherals: SPI, I2C, ADC, DMA, RTC, EXTI, TIM
-- [ ] Exception preemption/nesting + SVC/PendSV (unlocks FreeRTOS)
+- [x] More STM32 peripherals: SPI, I2C, ADC, TIM2-4, EXTI (DMA/RTC still open)
+- [x] Exception preemption/nesting + SVC/PendSV — unmodified FreeRTOS V11 runs (examples/freertos-blinky)
 - [ ] Altium/Eagle netlist ingest; KiCad PCB (.kicad_pcb) for copper-aware
   thermal + current paths
 - [ ] ngspice co-simulation engine for analog subcircuits

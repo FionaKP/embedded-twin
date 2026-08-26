@@ -17,3 +17,4 @@ class Profile:
     bus: PeripheralBus
     usarts: dict = field(default_factory=dict)       # name -> uart-capable periph
     gpio_ports: dict = field(default_factory=dict)
+    named: dict = field(default_factory=dict)        # name -> any peripheral

@@ -85,8 +85,22 @@ class CortexM(Component):
         # I2C masters
         self.i2c_buses: list[I2CBus] = []
         for b in p.get("i2c", []):
-            self.i2c_buses.append(I2CBus.on_nets(
-                self.kernel, self.require_net(b["scl"]), self.require_net(b["sda"])))
+            bus = I2CBus.on_nets(self.kernel, self.require_net(b["scl"]),
+                                 self.require_net(b["sda"]))
+            self.i2c_buses.append(bus)
+            if self.profile and b.get("periph"):
+                self.profile.named[b["periph"]].bus = bus
+
+        # SPI masters
+        from ..comm import SpiBus
+        self.spi_buses: list[SpiBus] = []
+        for s in p.get("spi", []):
+            bus = SpiBus.on_nets(self.kernel, self.require_net(s["sck"]),
+                                 self.net(s["mosi"]) if s.get("mosi") else None,
+                                 self.net(s["miso"]) if s.get("miso") else None)
+            self.spi_buses.append(bus)
+            if self.profile and s.get("periph"):
+                self.profile.named[s["periph"]].bus_ref = bus
 
         # power states
         self._i_run = self.clock_hz / 1e6 * p.get("i_run_ua_per_mhz", 150) * 1e-6
@@ -196,6 +210,11 @@ class CortexM(Component):
             return
         if self.system is not None:
             self.system.advance(self.kernel.now)
+        if self.profile is not None:
+            for periph in self.profile.bus.periphs:
+                adv = getattr(periph, "advance", None)
+                if adv is not None:
+                    adv(self.kernel.now)
         # keep SysTick jitter below one period by shortening slices
         ns = self.slice_ns
         if self.system is not None and self.system.systick.enabled:
@@ -216,7 +235,14 @@ class CortexM(Component):
                 # an interrupt is already pending and unmasked: no sleep
                 self.kernel.schedule(0, self._run_slice)
                 return
-            wake = self.system.next_wake_ns() if self.system else None
+            wakes = [self.system.next_wake_ns()] if self.system else []
+            if self.profile is not None:
+                for periph in self.profile.bus.periphs:
+                    nev = getattr(periph, "next_event_ns", None)
+                    if nev is not None:
+                        wakes.append(nev(self.kernel.now))
+            wakes = [w for w in wakes if w is not None]
+            wake = min(wakes) if wakes else None
             self._sleeping = True
             self.set_power_state("sleep")
             if wake is not None:
