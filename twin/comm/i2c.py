@@ -48,7 +48,7 @@ class I2CBus:
         ack = dev is not None and dev.i2c_write(bytes(data))
         self.kernel.trace.record(self.kernel.now, "i2c", self.sda.name,
                                  {"op": "W", "addr": addr, "data": list(data),
-                                  "ack": ack})
+                                  "ack": ack, "dur_ns": self._bus_time(len(data))})
         return ack
 
     def read(self, addr: int, n: int) -> Optional[bytes]:
@@ -57,5 +57,6 @@ class I2CBus:
         self.kernel.trace.record(self.kernel.now, "i2c", self.sda.name,
                                  {"op": "R", "addr": addr,
                                   "data": list(data) if data else None,
-                                  "ack": data is not None})
+                                  "ack": data is not None,
+                                  "dur_ns": self._bus_time(n)})
         return data

@@ -153,13 +153,29 @@ class PowerEngine:
     def accrue(self) -> None:
         now = self.kernel.now
         dt_ns = now - self._last_t
+        currents = self.rail_currents()
+
+        # time-series samples for the trace/UI: recorded on every operating-
+        # point change, including the t=0 power-on point (dt may be 0)
+        for rail, amps in currents.items():
+            ma = round(amps * 1000, 4)
+            if self._last_sample.get(rail) != ma:
+                self._last_sample[rail] = ma
+                self.kernel.trace.record(now, "rail", rail, ma)
+        for bat in self.batteries:
+            soc = round(bat.soc, 5)
+            if self._last_sample.get(("bat", bat.ref)) != soc:
+                self._last_sample[("bat", bat.ref)] = soc
+                amps = currents.get(bat.rail, 0.0)
+                self.kernel.trace.record(now, "battery", bat.ref,
+                                         {"soc": soc, "v": round(bat.voltage(amps), 3)})
+
         if dt_ns <= 0:
             return
         dt = dt_ns / SEC
         self._last_t = now
         self.total_time += dt_ns
 
-        currents = self.rail_currents()
         for rail, amps in currents.items():
             stats = self.rails.setdefault(rail, RailStats())
             v = self._voltages.get(rail, 0.0)
@@ -167,21 +183,11 @@ class PowerEngine:
             stats.charge_c += amps * dt
             stats.time_weighted_a += amps * dt
             stats.peak_a = max(stats.peak_a, amps)
-            # time-series sample for the trace/UI (only on change)
-            ma = round(amps * 1000, 4)
-            if self._last_sample.get(rail) != ma:
-                self._last_sample[rail] = ma
-                self.kernel.trace.record(now, "rail", rail, ma)
 
         for bat in self.batteries:
             amps = currents.get(bat.rail, 0.0)
             bat.drain(amps * dt)
             self._voltages[bat.rail] = bat.voltage(amps)
-            soc = round(bat.soc, 5)
-            if self._last_sample.get(("bat", bat.ref)) != soc:
-                self._last_sample[("bat", bat.ref)] = soc
-                self.kernel.trace.record(now, "battery", bat.ref,
-                                         {"soc": soc, "v": round(bat.voltage(amps), 3)})
 
         # regulator dissipation feeds thermal
         dissipation = dict(self._dissipation)

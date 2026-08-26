@@ -50,7 +50,11 @@ def export_trace(twin: BoardTwin, result: dict) -> dict[str, Any]:
         elif e.kind == "i2c":
             i2c[e.name].append([e.time, e.value])
         elif e.kind == "state":
-            states[e.name].append([e.time, e.value])
+            lane = states[e.name]
+            if lane and lane[-1][0] == e.time:
+                lane[-1][1] = e.value      # same-instant transition: keep last
+            else:
+                lane.append([e.time, e.value])
         elif e.kind == "rail":
             rails[e.name].append([e.time, e.value])
         elif e.kind == "battery":
